@@ -15,4 +15,4 @@ We used Storming Events approach to describe communication between components in
 ## Data model and domain model
 ![Data domain model](https://github.com/zvrvdmtr/Awesome-Task-Exchange-System/blob/arch/docs/domain_and_data_model.png)
 ## CUD events
-![CUD events](https://github.com/zvrvdmtr/Awesome-Task-Exchange-System/blob/arch/docs/domain_and_data_model.png)
+![CUD events](https://github.com/zvrvdmtr/Awesome-Task-Exchange-System/blob/arch/docs/cud_events.png)
