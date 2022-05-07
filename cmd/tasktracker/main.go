@@ -21,6 +21,12 @@ type User struct {
 	ClientSecret string `json:"ClientSecret"`
 }
 
+type UserDBItem struct {
+	ID     string `db:"id"`
+	Secret string `db:"secret"`
+	Domain string `db:"domain"`
+}
+
 var (
 	ErrSomething  = errors.New("Something goes wrong")
 	ErrParseToken = errors.New("Error parse token")
@@ -82,12 +88,26 @@ func isAdminMiddleware(f http.HandlerFunc, conn *pgx.Conn) http.HandlerFunc {
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
-		_, ok := token.Claims.(*generates.JWTAccessClaims)
+		claims, ok := token.Claims.(*generates.JWTAccessClaims)
 		if !ok {
 			http.Error(w, ErrParseToken.Error(), http.StatusBadRequest)
+			return
 		}
-		//row := conn.QueryRow(context.Background(), "SELECT * FROM clients where ID = $1", claims.StandardClaims.Id)
+
+		var userItem UserDBItem
+		row := conn.QueryRow(context.Background(), `SELECT id, secret, domain FROM clients where ID = $1`, claims.StandardClaims.Audience)
+		err = row.Scan(&userItem.ID, &userItem.Secret, &userItem.Domain)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if userItem.Domain != "Admin" {
+			http.Error(w, "access denied", http.StatusBadRequest)
+			return
+		}
 		f.ServeHTTP(w, r)
 	})
 }
@@ -101,7 +121,7 @@ func validateToken(f http.HandlerFunc, client *http.Client) http.HandlerFunc {
 			return
 		}
 		if resp.StatusCode == http.StatusBadRequest {
-			http.Error(w, "Access denied", http.StatusBadRequest)
+			http.Error(w, "access denied", http.StatusBadRequest)
 			return
 		}
 		f.ServeHTTP(w, r)
