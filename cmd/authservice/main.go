@@ -15,6 +15,7 @@ import (
 	"github.com/go-oauth2/oauth2/v4/store"
 	"github.com/golang-jwt/jwt"
 	"github.com/jackc/pgx/v4"
+	"github.com/streadway/amqp"
 	pg "github.com/vgarvardt/go-oauth2-pg/v4"
 	"github.com/vgarvardt/go-pg-adapter/pgx4adapter"
 )
@@ -26,7 +27,28 @@ type User struct {
 }
 
 func main() {
-	conn, _ := pgx.Connect(context.Background(), "postgres://postgres:postgres@localhost:5432/postgres")
+	conn, err := pgx.Connect(context.Background(), "postgres://postgres:postgres@localhost:5432/postgres")
+	if err != nil {
+		log.Fatalf("Can`t connect to DB: %s", err.Error())
+	}
+	defer conn.Close(context.Background())
+
+	rabbitConn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	if err != nil {
+		log.Fatalf("Can`t connect to RabbitMQ: %s", err.Error())
+	}
+	defer rabbitConn.Close()
+
+	channel, err := rabbitConn.Channel()
+	if err != nil {
+		log.Fatalf("Can`t create channel: %s", err.Error())
+	}
+	defer channel.Close()
+
+	queue, err := channel.QueueDeclare("user_task_service", true, false, false, false, nil)
+	if err != nil {
+		log.Fatalf("Can`t declare queue: %s", err.Error())
+	}
 
 	manager := manage.NewDefaultManager()
 	manager.SetAuthorizeCodeTokenCfg(manage.DefaultAuthorizeCodeTokenCfg)
@@ -78,7 +100,19 @@ func main() {
 
 			w.Header().Set("Content-Type", "application/json")
 
-			// TODO: Send CUD event to RabbitMQ
+			err = channel.Publish(
+				"",
+				queue.Name,
+				false,
+				false,
+				amqp.Publishing{
+					ContentType: "application/json",
+					Body:        body,
+				})
+
+			if err != nil {
+				log.Printf("failed to publish a message: %s", body)
+			}
 
 			json.NewEncoder(w).Encode(map[string]string{
 				"CLIENT_ID":     newUser.ClientID,
@@ -101,4 +135,8 @@ func main() {
 	})
 
 	log.Fatal(http.ListenAndServe(":9096", nil))
+}
+
+func some() {
+
 }
