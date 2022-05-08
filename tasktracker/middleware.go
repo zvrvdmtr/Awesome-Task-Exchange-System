@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-oauth2/oauth2/v4/generates"
@@ -17,18 +18,33 @@ type UserDBItem struct {
 	Domain string `db:"domain"`
 }
 
+type TaskEntity struct {
+	ID          int    `db:"id"`
+	Description string `db:"description"`
+	Status      bool   `db:"status"`
+	PopugID     string `db:"popug_id"`
+}
+
+func parseToken(access string) (*generates.JWTAccessClaims, error) {
+	token, err := jwt.ParseWithClaims(strings.Split(access, " ")[1], &generates.JWTAccessClaims{}, func(t *jwt.Token) (interface{}, error) {
+		return []byte("00000000"), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	claims, ok := token.Claims.(*generates.JWTAccessClaims)
+	if !ok {
+		return nil, err
+	}
+
+	return claims, nil
+}
+
 func IsAdminMiddleware(f http.HandlerFunc, conn *pgx.Conn) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		access := r.Header.Get("Authorization")
-		token, err := jwt.ParseWithClaims(strings.Split(access, " ")[1], &generates.JWTAccessClaims{}, func(t *jwt.Token) (interface{}, error) {
-			return []byte("00000000"), nil
-		})
+		claims, err := parseToken(access)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		claims, ok := token.Claims.(*generates.JWTAccessClaims)
-		if !ok {
 			http.Error(w, ErrParseToken.Error(), http.StatusBadRequest)
 			return
 		}
@@ -49,7 +65,7 @@ func IsAdminMiddleware(f http.HandlerFunc, conn *pgx.Conn) http.HandlerFunc {
 	})
 }
 
-func ValidateToken(f http.HandlerFunc, client *http.Client) http.HandlerFunc {
+func ValidateTokenMiddleware(f http.HandlerFunc, client *http.Client) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := r.Header.Get("Authorization")
 		resp, err := client.Get(fmt.Sprintf("http://localhost:9096/verify?access_token=%s", strings.Split(token, " ")[1]))
@@ -61,6 +77,33 @@ func ValidateToken(f http.HandlerFunc, client *http.Client) http.HandlerFunc {
 			http.Error(w, "access denied", http.StatusBadRequest)
 			return
 		}
+		f.ServeHTTP(w, r)
+	})
+}
+
+func CurrentUserMiddleware(f http.HandlerFunc, conn *pgx.Conn) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		access := r.Header.Get("Authorization")
+		claims, err := parseToken(access)
+		if err != nil {
+			http.Error(w, ErrParseToken.Error(), http.StatusBadRequest)
+			return
+		}
+		var task TaskEntity
+		taskID, err := strconv.Atoi(r.URL.Query().Get("task"))
+		fmt.Println(claims.StandardClaims.Audience)
+		row := conn.QueryRow(
+			context.Background(),
+			`SELECT id, description, status, popug_id FROM tasks where popug_id = $1 and id = $2 and status = $3`,
+			claims.StandardClaims.Audience,
+			taskID,
+			true)
+		err = row.Scan(&task.ID, &task.Description, &task.Status, &task.PopugID)
+		if err != nil {
+			http.Error(w, "Access denied", http.StatusBadRequest)
+			return
+		}
+
 		f.ServeHTTP(w, r)
 	})
 }
