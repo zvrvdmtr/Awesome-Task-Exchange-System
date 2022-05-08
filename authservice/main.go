@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os/signal"
@@ -12,7 +10,6 @@ import (
 	"github.com/go-oauth2/oauth2/v4/errors"
 	"github.com/go-oauth2/oauth2/v4/generates"
 	"github.com/go-oauth2/oauth2/v4/manage"
-	"github.com/go-oauth2/oauth2/v4/models"
 	"github.com/go-oauth2/oauth2/v4/server"
 	"github.com/go-oauth2/oauth2/v4/store"
 	"github.com/golang-jwt/jwt"
@@ -82,56 +79,11 @@ func main() {
 		log.Printf("Response Error: %s", re.Error.Error())
 	})
 
-	http.HandleFunc("/registration", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			body, err := ioutil.ReadAll(r.Body)
-			if err != nil {
-				log.Printf("can`t read body: %s", err.Error())
-			}
-
-			var newUser User
-			err = json.Unmarshal(body, &newUser)
-			if err != nil {
-				log.Printf("can`t unmarshal body to struct: %s", err.Error())
-			}
-
-			err = clientStore.Create(&models.Client{
-				ID:     newUser.ClientID,
-				Secret: newUser.ClientSecret,
-				Domain: newUser.Role, // use Domain field as Role field
-			})
-			if err != nil {
-				log.Printf("can`t add new user: %s", err.Error())
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-
-			err = channel.Publish(
-				"",
-				queue.Name,
-				false,
-				false,
-				amqp.Publishing{
-					ContentType: "application/json",
-					Body:        body,
-				})
-
-			if err != nil {
-				log.Printf("failed to publish a message: %s", body)
-			}
-
-			json.NewEncoder(w).Encode(map[string]string{
-				"CLIENT_ID":     newUser.ClientID,
-				"CLIENT_SECRET": newUser.ClientSecret,
-				"ROLE":          newUser.Role,
-			})
-		}
-	})
-
+	// handlers
+	http.HandleFunc("/registration", Registration(clientStore, channel, queue))
 	http.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		srv.HandleTokenRequest(w, r)
 	})
-
 	http.HandleFunc("/verify", func(w http.ResponseWriter, r *http.Request) {
 		_, err := srv.ValidationBearerToken(r)
 		if err != nil {
@@ -140,7 +92,7 @@ func main() {
 		}
 	})
 
-	//run server
+	//run authorization service
 	go func() {
 		if err := http.ListenAndServe(":9096", nil); err != nil {
 			log.Fatalf("listen: %s\n", err)
