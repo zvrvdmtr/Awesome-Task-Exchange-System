@@ -65,6 +65,32 @@ func Authorization(client *http.Client) http.HandlerFunc {
 	}
 }
 
+func TasksList(connection *pgx.Conn) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := r.Header.Get("Authorization")
+		claims, err := parseToken(token)
+		if err != nil {
+			http.Error(w, ErrParseToken.Error(), http.StatusBadRequest)
+			return
+		}
+		rows, err := connection.Query(context.Background(), "SELECT id, description, status, popug_id FROM tasks where popug_id = $1", claims.StandardClaims.Audience)
+		if err != nil {
+			http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
+		}
+		tasks := make([]TaskEntity, 0)
+		for rows.Next() {
+			var task TaskEntity
+			err = rows.Scan(&task.ID, &task.Description, &task.Status, &task.PopugID)
+			if err != nil {
+				log.Printf("error while parse: %s", err.Error())
+			}
+			tasks = append(tasks, task)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(tasks)
+	}
+}
+
 func AddTask(connection *pgx.Conn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -105,7 +131,10 @@ func ShuffleTasks(connection *pgx.Conn) http.HandlerFunc {
 			clientsIDs := make([]string, 0)
 			for clientsRows.Next() {
 				var popugID string
-				clientsRows.Scan(&popugID)
+				err = clientsRows.Scan(&popugID)
+				if err != nil {
+					log.Printf("error while parse: %s", err.Error())
+				}
 				clientsIDs = append(clientsIDs, popugID)
 			}
 

@@ -91,7 +91,6 @@ func CurrentUserMiddleware(f http.HandlerFunc, conn *pgx.Conn) http.HandlerFunc 
 		}
 		var task TaskEntity
 		taskID, err := strconv.Atoi(r.URL.Query().Get("task"))
-		fmt.Println(claims.StandardClaims.Audience)
 		row := conn.QueryRow(
 			context.Background(),
 			`SELECT id, description, status, popug_id FROM tasks where popug_id = $1 and id = $2 and status = $3`,
