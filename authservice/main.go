@@ -6,6 +6,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os/signal"
+	"syscall"
 
 	"github.com/go-oauth2/oauth2/v4/errors"
 	"github.com/go-oauth2/oauth2/v4/generates"
@@ -27,6 +29,10 @@ type User struct {
 }
 
 func main() {
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	conn, err := pgx.Connect(context.Background(), "postgres://postgres:postgres@localhost:5432/postgres")
 	if err != nil {
 		log.Fatalf("Can`t connect to DB: %s", err.Error())
@@ -45,7 +51,7 @@ func main() {
 	}
 	defer channel.Close()
 
-	queue, err := channel.QueueDeclare("user_task_service", true, false, false, false, nil)
+	queue, err := channel.QueueDeclare("task_tracker_service", true, false, false, false, nil)
 	if err != nil {
 		log.Fatalf("Can`t declare queue: %s", err.Error())
 	}
@@ -134,9 +140,13 @@ func main() {
 		}
 	})
 
-	log.Fatal(http.ListenAndServe(":9096", nil))
-}
-
-func some() {
-
+	//run server
+	go func() {
+		if err := http.ListenAndServe(":9096", nil); err != nil {
+			log.Fatalf("listen: %s\n", err)
+		}
+		stop()
+	}()
+	log.Println("auth service started on :9096")
+	<-ctx.Done()
 }
