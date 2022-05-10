@@ -14,6 +14,12 @@ import (
 	"github.com/streadway/amqp"
 )
 
+// TODO add context to handlers
+// TODO move rmq connection and consuming to separate file
+// TODO move sql migration to .sql files
+// TODO pass data from middleware to handler
+// TODO add separate file for entities
+
 type UserEvent struct {
 	ClientID     string `json:"ClientID"`
 	ClientSecret string `json:"ClientSecret"`

@@ -25,6 +25,10 @@ type User struct {
 	Role         string `json:"Role"`
 }
 
+// TODO figure out with OAuth library and maybe substitute it to another
+// TODO add separate file for entities
+// TODO queue naming
+
 func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

@@ -161,6 +161,9 @@ func ShuffleTasks(connection *pgx.Conn) http.HandlerFunc {
 				}
 			}
 			err = tx.Commit(context.Background())
+
+			//TODO: Send CUD and BE to account service and CUD to analytics service
+
 			if err != nil {
 				http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 			}
