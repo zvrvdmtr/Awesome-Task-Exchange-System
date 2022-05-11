@@ -11,7 +11,7 @@ import (
 	pg "github.com/vgarvardt/go-oauth2-pg/v4"
 )
 
-func Registration(clientStore *pg.ClientStore, channel *amqp.Channel, queue amqp.Queue) http.HandlerFunc {
+func Registration(clientStore *pg.ClientStore, channel *amqp.Channel) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			body, err := ioutil.ReadAll(r.Body)
@@ -37,8 +37,8 @@ func Registration(clientStore *pg.ClientStore, channel *amqp.Channel, queue amqp
 			w.Header().Set("Content-Type", "application/json")
 
 			err = channel.Publish(
+				"authService.userRegistered",
 				"",
-				queue.Name,
 				false,
 				false,
 				amqp.Publishing{

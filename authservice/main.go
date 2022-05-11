@@ -52,10 +52,11 @@ func main() {
 	}
 	defer channel.Close()
 
-	queue, err := channel.QueueDeclare("task_tracker_service", true, false, false, false, nil)
+	err = channel.ExchangeDeclare("authService.userRegistered", "fanout", true, false, false, false, nil)
 	if err != nil {
-		log.Fatalf("Can`t declare queue: %s", err.Error())
+		log.Fatalf("Can`t create exchange: %s", err.Error())
 	}
+	defer channel.Close()
 
 	manager := manage.NewDefaultManager()
 	manager.SetAuthorizeCodeTokenCfg(manage.DefaultAuthorizeCodeTokenCfg)
@@ -84,7 +85,7 @@ func main() {
 	})
 
 	// handlers
-	http.HandleFunc("/registration", Registration(clientStore, channel, queue))
+	http.HandleFunc("/registration", Registration(clientStore, channel))
 	http.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		srv.HandleTokenRequest(w, r)
 	})
