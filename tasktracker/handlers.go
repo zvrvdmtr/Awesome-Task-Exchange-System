@@ -122,7 +122,6 @@ func AddTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
 				log.Printf("can`t insert to DB: %s", err.Error())
 			}
 
-			//TODO: Send CUD and BE to account service and CUD to analytics service
 			byteEvent, err := json.Marshal(taskEvent)
 			if err != nil {
 				http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
@@ -141,6 +140,8 @@ func AddTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
 			if err != nil {
 				log.Printf("can`t publish message: %s", err.Error())
 			}
+
+			//TODO: Add CUD to analytics service
 
 			w.Write([]byte("Ok!"))
 		} else {
@@ -226,7 +227,7 @@ func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc 
 				}
 			}
 
-			//TODO: Send CUD and BE to account service and CUD to analytics service
+			//TODO: Add CUD to analytics service
 
 		} else {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -270,7 +271,7 @@ func CloseTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
 			log.Printf("can`t publish message: %s", err.Error())
 		}
 
-		////TODO: Send BE to account service and CUD to analytics service
+		//TODO: Add CUD to analytics service
 
 		w.Write([]byte(fmt.Sprintf("Task '%s' successfully closed.", taskID)))
 
