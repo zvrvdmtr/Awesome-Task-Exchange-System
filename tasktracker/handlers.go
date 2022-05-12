@@ -9,7 +9,9 @@ import (
 	"math/rand"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4"
+	"github.com/streadway/amqp"
 )
 
 type User struct {
@@ -19,8 +21,15 @@ type User struct {
 
 type Task struct {
 	Description string `json:"Description"`
-	Status      bool   `json:"Status"`
+	IsOpen      bool   `json:"Is_open"`
 	PopugID     string `json:"PopugID"`
+}
+
+type TaskEvent struct {
+	Description string    `json:"description"`
+	IsOpen      bool      `json:"is_open"`
+	PopugID     string    `json:"popug_id"`
+	PublicID    uuid.UUID `json:"public_id"`
 }
 
 func Authorization(client *http.Client) http.HandlerFunc {
@@ -73,14 +82,14 @@ func TasksList(connection *pgx.Conn) http.HandlerFunc {
 			http.Error(w, ErrParseToken.Error(), http.StatusBadRequest)
 			return
 		}
-		rows, err := connection.Query(context.Background(), "SELECT id, description, status, popug_id FROM tasks where popug_id = $1", claims.StandardClaims.Audience)
+		rows, err := connection.Query(context.Background(), "SELECT id, description, is_open, popug_id FROM tasks where popug_id = $1", claims.StandardClaims.Audience)
 		if err != nil {
 			http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 		}
 		tasks := make([]TaskEntity, 0)
 		for rows.Next() {
 			var task TaskEntity
-			err = rows.Scan(&task.ID, &task.Description, &task.Status, &task.PopugID)
+			err = rows.Scan(&task.ID, &task.Description, &task.IsOpen, &task.PopugID)
 			if err != nil {
 				log.Printf("error while parse: %s", err.Error())
 			}
@@ -91,7 +100,7 @@ func TasksList(connection *pgx.Conn) http.HandlerFunc {
 	}
 }
 
-func AddTask(connection *pgx.Conn) http.HandlerFunc {
+func AddTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			body, err := ioutil.ReadAll(r.Body)
@@ -105,12 +114,34 @@ func AddTask(connection *pgx.Conn) http.HandlerFunc {
 				http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 			}
 
-			_, err = connection.Exec(context.Background(), "INSERT INTO tasks (description, status, popug_id) VALUES ($1, $2, $3)", task.Description, task.Status, task.PopugID)
+			taskUUID := uuid.New()
+			taskEvent := fromTaskToEvent(task, taskUUID)
+
+			_, err = connection.Exec(context.Background(), "INSERT INTO tasks (description, is_open, popug_id, public_id) VALUES ($1, $2, $3, $4)", task.Description, task.IsOpen, task.PopugID, taskUUID)
 			if err != nil {
 				log.Printf("can`t insert to DB: %s", err.Error())
 			}
 
-			//TODO: Send CUD and BE to account service and CUD to analytics service
+			byteEvent, err := json.Marshal(taskEvent)
+			if err != nil {
+				http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
+			}
+			log.Print(string(byteEvent))
+
+			err = channel.Publish(
+				"trackerService.TaskStatus",
+				"",
+				false,
+				false,
+				amqp.Publishing{
+					ContentType: "application/json",
+					Body:        byteEvent,
+				})
+			if err != nil {
+				log.Printf("can`t publish message: %s", err.Error())
+			}
+
+			//TODO: Add CUD to analytics service
 
 			w.Write([]byte("Ok!"))
 		} else {
@@ -119,7 +150,7 @@ func AddTask(connection *pgx.Conn) http.HandlerFunc {
 	}
 }
 
-func ShuffleTasks(connection *pgx.Conn) http.HandlerFunc {
+func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 
@@ -139,9 +170,10 @@ func ShuffleTasks(connection *pgx.Conn) http.HandlerFunc {
 			}
 
 			// start transaction
+			updatedTasks := make([]TaskEntity, 0)
 			tx, err := connection.BeginTx(context.Background(), pgx.TxOptions{})
 			defer tx.Rollback(context.Background())
-			tasksRows, err := tx.Query(context.Background(), "SELECT id FROM tasks where status = $1", true)
+			tasksRows, err := tx.Query(context.Background(), "SELECT id FROM tasks where is_open = $1", true)
 			if err != nil {
 				http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 			}
@@ -153,20 +185,49 @@ func ShuffleTasks(connection *pgx.Conn) http.HandlerFunc {
 				}
 				tasksIDs = append(tasksIDs, taskID)
 			}
-			for taskID := range tasksIDs {
-				randomPopougID := rand.Intn(100)
-				_, err = tx.Exec(context.Background(), "UPDATE tasks SET popug_id = $1 WHERE id = $2", clientsIDs[randomPopougID], taskID)
+
+			for _, taskID := range tasksIDs {
+				randomPopougID := rand.Intn(len(clientsIDs))
+				var taskEntity TaskEntity
+				row := tx.QueryRow(context.Background(), "UPDATE tasks SET popug_id = $1 WHERE id = $2 RETURNING popug_id, public_id", clientsIDs[randomPopougID], taskID)
+				err = row.Scan(&taskEntity.PopugID, &taskEntity.PublicID)
 				if err != nil {
 					http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 				}
+				updatedTasks = append(updatedTasks, taskEntity)
 			}
 			err = tx.Commit(context.Background())
-
-			//TODO: Send CUD and BE to account service and CUD to analytics service
-
 			if err != nil {
 				http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 			}
+
+			for _, updatedTask := range updatedTasks {
+				taskEvent := TaskEvent{
+					PublicID: updatedTask.PublicID,
+					PopugID:  updatedTask.PopugID,
+				}
+
+				byteEvent, err := json.Marshal(taskEvent)
+				if err != nil {
+					http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
+				}
+				log.Print(string(byteEvent))
+
+				err = channel.Publish(
+					"trackerService.TaskStatus",
+					"",
+					false,
+					false,
+					amqp.Publishing{
+						ContentType: "application/json",
+						Body:        byteEvent,
+					})
+				if err != nil {
+					log.Printf("can`t publish message: %s", err.Error())
+				}
+			}
+
+			//TODO: Add CUD to analytics service
 
 		} else {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -174,18 +235,45 @@ func ShuffleTasks(connection *pgx.Conn) http.HandlerFunc {
 	}
 }
 
-func CloseTask(connection *pgx.Conn) http.HandlerFunc {
+func CloseTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		task := r.URL.Query().Get("task")
-		_, err := connection.Exec(context.Background(), "UPDATE tasks SET status = $1 where id = $2", false, task)
+		taskID := r.URL.Query().Get("task")
+		rows := connection.QueryRow(context.Background(), "UPDATE tasks SET is_open = $1 where id = $2 RETURNING is_open, public_id, popug_id", false, taskID)
+		var taskEntity TaskEntity
+		err := rows.Scan(&taskEntity.IsOpen, &taskEntity.PublicID, &taskEntity.PopugID)
 		if err != nil {
 			http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		//TODO: Send BE to account service and CUD to analytics service
+		taskEvent := TaskEvent{
+			IsOpen:   taskEntity.IsOpen,
+			PublicID: taskEntity.PublicID,
+			PopugID:  taskEntity.PopugID,
+		}
 
-		w.Write([]byte(fmt.Sprintf("Task '%s' successfully closed.", task)))
+		byteEvent, err := json.Marshal(taskEvent)
+		if err != nil {
+			http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
+		}
+		log.Print(string(byteEvent))
+
+		err = channel.Publish(
+			"trackerService.TaskStatus",
+			"",
+			false,
+			false,
+			amqp.Publishing{
+				ContentType: "application/json",
+				Body:        byteEvent,
+			})
+		if err != nil {
+			log.Printf("can`t publish message: %s", err.Error())
+		}
+
+		//TODO: Add CUD to analytics service
+
+		w.Write([]byte(fmt.Sprintf("Task '%s' successfully closed.", taskID)))
 
 	}
 }

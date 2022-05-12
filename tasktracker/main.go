@@ -33,21 +33,28 @@ var (
 
 func init() {
 	conn, _ := pgx.Connect(context.Background(), "postgres://postgres:postgres@localhost:5433/postgres")
-	conn.Exec(context.Background(), `
-	CREATE TABLE IF NOT EXISTS users (
+	_, err := conn.Exec(context.Background(), `
+	CREATE TABLE IF NOT EXISTS clients (
 	  id     	 TEXT  NOT NULL,
 	  secret 	 TEXT  NOT NULL,
 	  domain 	 TEXT  NOT NULL,
 	  CONSTRAINT clients_pkey PRIMARY KEY (id)
 	);`)
+	if err != nil {
+		log.Fatalf("Migration failed %s", err.Error())
+	}
 
-	conn.Exec(context.Background(), `
+	_, err = conn.Exec(context.Background(), `
 	CREATE TABLE IF NOT EXISTS tasks (
-	  id 			bigserial primary key,
-	  description   TEXT  NOT NULL,
-	  is_open		bool   NOT NULL,
-	  popug_id 		TEXT REFERENCES clients (id)
+	  id 			bigserial PRIMARY KEY,
+	  description   TEXT 	  NOT NULL,
+	  is_open		bool 	  NOT NULL,
+	  public_id		UUID 	  NOT NULL,
+	  popug_id 		TEXT 	  REFERENCES clients (id)
 	);`)
+	if err != nil {
+		log.Fatalf("Migration failed %s", err.Error())
+	}
 }
 
 func main() {
@@ -70,7 +77,24 @@ func main() {
 	}
 	defer channel.Close()
 
-	queue, err := channel.QueueDeclare("task_tracker_service", true, false, false, false, nil)
+	err = channel.ExchangeDeclare("authService.userRegistered", "fanout", true, false, false, false, nil)
+	if err != nil {
+		log.Fatalf("Can`t create exchange: %s", err.Error())
+	}
+	defer channel.Close()
+
+	err = channel.ExchangeDeclare("trackerService.TaskStatus", "fanout", true, false, false, false, nil)
+	if err != nil {
+		log.Fatalf("Can`t create exchange: %s", err.Error())
+	}
+	defer channel.Close()
+
+	queue, err := channel.QueueDeclare("", true, false, false, false, nil)
+	if err != nil {
+		log.Fatalf("Can`t declare queue: %s", err.Error())
+	}
+
+	err = channel.QueueBind(queue.Name, "", "authService.userRegistered", false, nil)
 	if err != nil {
 		log.Fatalf("Can`t declare queue: %s", err.Error())
 	}
@@ -81,9 +105,9 @@ func main() {
 	client := http.Client{Timeout: 1 * time.Second}
 	http.HandleFunc("/auth", Authorization(&client))
 	http.HandleFunc("/tasks", ValidateTokenMiddleware(TasksList(conn), &client))
-	http.HandleFunc("/tasks/add", ValidateTokenMiddleware(AddTask(conn), &client))
-	http.HandleFunc("/tasks/shuffle", IsAdminMiddleware(ValidateTokenMiddleware(ShuffleTasks(conn), &client), conn))
-	http.HandleFunc("/tasks/close", CurrentUserMiddleware(CloseTask(conn), conn))
+	http.HandleFunc("/tasks/add", ValidateTokenMiddleware(AddTask(conn, channel), &client))
+	http.HandleFunc("/tasks/shuffle", IsAdminMiddleware(ValidateTokenMiddleware(ShuffleTasks(conn, channel), &client), conn))
+	http.HandleFunc("/tasks/close", CurrentUserMiddleware(CloseTask(conn, channel), conn))
 
 	//run service
 	go func() {

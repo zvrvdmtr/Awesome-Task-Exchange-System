@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-oauth2/oauth2/v4/generates"
 	"github.com/golang-jwt/jwt"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4"
 )
 
@@ -19,10 +20,11 @@ type UserDBItem struct {
 }
 
 type TaskEntity struct {
-	ID          int    `db:"id"`
-	Description string `db:"description"`
-	Status      bool   `db:"status"`
-	PopugID     string `db:"popug_id"`
+	ID          int       `db:"id"`
+	Description string    `db:"description"`
+	IsOpen      bool      `db:"is_open"`
+	PopugID     string    `db:"popug_id"`
+	PublicID    uuid.UUID `db:"public_id"`
 }
 
 func parseToken(access string) (*generates.JWTAccessClaims, error) {
@@ -93,12 +95,13 @@ func CurrentUserMiddleware(f http.HandlerFunc, conn *pgx.Conn) http.HandlerFunc 
 		taskID, err := strconv.Atoi(r.URL.Query().Get("task"))
 		row := conn.QueryRow(
 			context.Background(),
-			`SELECT id, description, status, popug_id FROM tasks where popug_id = $1 and id = $2 and status = $3`,
+			`SELECT id, description, is_open, popug_id FROM tasks where popug_id = $1 and id = $2 and is_open = $3`,
 			claims.StandardClaims.Audience,
 			taskID,
 			true)
-		err = row.Scan(&task.ID, &task.Description, &task.Status, &task.PopugID)
+		err = row.Scan(&task.ID, &task.Description, &task.IsOpen, &task.PopugID)
 		if err != nil {
+			fmt.Println(err)
 			http.Error(w, "Access denied", http.StatusBadRequest)
 			return
 		}
