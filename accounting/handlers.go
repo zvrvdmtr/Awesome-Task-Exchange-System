@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/streadway/amqp"
 )
 
 func Authorization(client *http.Client) http.HandlerFunc {
@@ -136,7 +137,7 @@ func AllAccounts(conn *pgxpool.Pool) http.HandlerFunc {
 }
 
 // DailyResult handler call only by scheduler
-func DailyResult(conn *pgxpool.Pool) http.HandlerFunc {
+func DailyResult(conn *pgxpool.Pool, channel *amqp.Channel) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		currentTime := time.Now()
 		yesterday := currentTime.AddDate(0, 0, -1)
@@ -151,26 +152,52 @@ func DailyResult(conn *pgxpool.Pool) http.HandlerFunc {
 			log.Printf("Can't query rows %s", err.Error())
 		}
 		for logRows.Next() {
-			var money int
-			var accountID int
-			err = logRows.Scan(&accountID, &money)
+			var Money int
+			var AccountID int
+			var PopugID string
+			err = logRows.Scan(&AccountID, &Money)
 			if err != nil {
 				log.Printf("Can't scan row %s", err)
 			}
 
-			if money > 0 {
-				_, err = conn.Exec(
+			if Money > 0 {
+				row := conn.QueryRow(
 					context.Background(),
-					"UPDATE accounts SET money=money-$1 WHERE id = $2",
-					money,
-					accountID,
+					"UPDATE accounts SET money=money-$1 WHERE id = $2 RETURNING popug_id",
+					Money,
+					AccountID,
 				)
+				err = row.Scan(&PopugID)
 				if err != nil {
-					log.Printf("Can't update row %s", err)
+					log.Printf("Can't scan row %s", err)
 				}
+				//TODO send email somewhere here
 
-				//	TODO send email somewhere here
+			} else {
+				accountRow := conn.QueryRow(context.Background(), "SELECT popug_id FROM accounts WHERE id = $1", AccountID)
+				err = accountRow.Scan(&PopugID)
+				if err != nil {
+					log.Printf("Can't scan row %s", err)
+				}
 			}
+			byteMoneyEvent, err := json.Marshal(DailyMoneyEvent{
+				Money:   Money,
+				PopugID: PopugID,
+				Date:    time.Now(),
+			})
+			if err != nil {
+				log.Printf("can`t marshal struct to body: %s", err.Error())
+			}
+
+			channel.Publish(
+				"accountingService.DailyMoney",
+				"",
+				false,
+				false,
+				amqp.Publishing{
+					ContentType: "application/json",
+					Body:        byteMoneyEvent,
+				})
 		}
 	}
 }

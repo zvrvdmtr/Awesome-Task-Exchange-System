@@ -29,7 +29,7 @@ func UserEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery) {
 	}
 }
 
-func TaskEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery) {
+func TaskEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery, channel *amqp.Channel) {
 	for message := range messages {
 		var task TaskEvent
 		err := json.Unmarshal(message.Body, &task)
@@ -42,6 +42,23 @@ func TaskEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery) {
 			money = rand.Intn(-10-(-20)) + (-20)
 		case false:
 			money = rand.Intn(40-20) + 20
+			byteEvent, err := json.Marshal(TaskWithMoneyAndDateEvent{
+				Money:    money,
+				PublicID: task.PublicID,
+				Date:     time.Now(),
+			})
+			if err != nil {
+				log.Printf("can`t marshal struct to body: %s", err.Error())
+			}
+			channel.Publish(
+				"accountingService.TaskStatus",
+				"",
+				false,
+				false,
+				amqp.Publishing{
+					ContentType: "application/json",
+					Body:        byteEvent,
+				})
 		}
 
 		var accountID int

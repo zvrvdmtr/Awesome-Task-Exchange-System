@@ -29,6 +29,19 @@ type TaskEvent struct {
 	PublicID    uuid.UUID `json:"public_id"`
 }
 
+type TaskWithMoneyAndDateEvent struct {
+	PopugID  string
+	PublicID uuid.UUID
+	Money    int
+	Date     time.Time
+}
+
+type DailyMoneyEvent struct {
+	PopugID string
+	Money   int
+	Date    time.Time
+}
+
 type User struct {
 	ClientID     string `json:"ClientID"`
 	ClientSecret string `json:"ClientSecret"`
@@ -117,7 +130,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Can`t create exchange: %s", err.Error())
 	}
-	defer channel.Close()
 	queue, err := channel.QueueDeclare("userRegistered", true, false, false, false, nil)
 	if err != nil {
 		log.Fatalf("Can`t declare queue: %s", err.Error())
@@ -133,7 +145,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Can`t create exchange: %s", err.Error())
 	}
-	defer channel.Close()
 	taskQueue, err := channel.QueueDeclare("taskStatus", true, false, false, false, nil)
 	if err != nil {
 		log.Fatalf("Can`t declare queue: %s", err.Error())
@@ -144,11 +155,17 @@ func main() {
 	}
 	taskMessages, err := channel.Consume(taskQueue.Name, "", true, false, false, false, nil)
 
+	// money events
+	err = channel.ExchangeDeclare("accountingService.TaskStatus", "fanout", true, false, false, false, nil)
+	if err != nil {
+		log.Fatalf("Can`t create exchange: %s", err.Error())
+	}
+
 	client := http.Client{Timeout: 1 * time.Second}
 	http.HandleFunc("/auth", Authorization(&client))
 	http.HandleFunc("/account", ValidateTokenMiddleware(PopugAccount(connPool), &client))
 	http.HandleFunc("/account/admin", AllAccounts(connPool))
-	http.HandleFunc("/daily", DailyResult(connPool))
+	http.HandleFunc("/daily", DailyResult(connPool, channel))
 	//http.HandleFunc("/account/admin", IsAdminMiddleware(AllAccounts(conn), conn))
 
 	//run service
@@ -161,7 +178,7 @@ func main() {
 	log.Println("Account service started on :8081")
 
 	go UserEventsHandler(connPool, messages)
-	go TaskEventsHandler(connPool, taskMessages)
+	go TaskEventsHandler(connPool, taskMessages, channel)
 	log.Println("Waiting for messages. To exit press CTRL+C")
 
 	<-ctx.Done()
