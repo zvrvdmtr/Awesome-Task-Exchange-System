@@ -20,12 +20,14 @@ type User struct {
 }
 
 type Task struct {
-	Description string `json:"Description"`
-	IsOpen      bool   `json:"Is_open"`
-	PopugID     string `json:"PopugID"`
+	Description string `json:"description"`
+	JiraID      string `json:"jira_id"`
+	IsOpen      bool   `json:"is_open"`
+	PopugID     string `json:"popug_id"`
 }
 
 type TaskEvent struct {
+	JiraID      string    `json:"jira_id"`
 	Description string    `json:"description"`
 	IsOpen      bool      `json:"is_open"`
 	PopugID     string    `json:"popug_id"`
@@ -82,14 +84,18 @@ func TasksList(connection *pgx.Conn) http.HandlerFunc {
 			http.Error(w, ErrParseToken.Error(), http.StatusBadRequest)
 			return
 		}
-		rows, err := connection.Query(context.Background(), "SELECT id, description, is_open, popug_id FROM tasks where popug_id = $1", claims.StandardClaims.Audience)
+		rows, err := connection.Query(
+			context.Background(),
+			"SELECT id, jira_id, description, is_open, popug_id FROM tasks where popug_id = $1",
+			claims.StandardClaims.Audience,
+		)
 		if err != nil {
 			http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 		}
 		tasks := make([]TaskEntity, 0)
 		for rows.Next() {
 			var task TaskEntity
-			err = rows.Scan(&task.ID, &task.Description, &task.IsOpen, &task.PopugID)
+			err = rows.Scan(&task.ID, &task.JiraID, &task.Description, &task.IsOpen, &task.PopugID)
 			if err != nil {
 				log.Printf("error while parse: %s", err.Error())
 			}
@@ -117,7 +123,15 @@ func AddTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
 			taskUUID := uuid.New()
 			taskEvent := fromTaskToEvent(task, taskUUID)
 
-			_, err = connection.Exec(context.Background(), "INSERT INTO tasks (description, is_open, popug_id, public_id) VALUES ($1, $2, $3, $4)", task.Description, task.IsOpen, task.PopugID, taskUUID)
+			_, err = connection.Exec(
+				context.Background(),
+				"INSERT INTO tasks (description, jira_id, is_open, popug_id, public_id) VALUES ($1, $2, $3, $4, $5)",
+				task.Description,
+				task.JiraID,
+				task.IsOpen,
+				task.PopugID,
+				taskUUID,
+			)
 			if err != nil {
 				log.Printf("can`t insert to DB: %s", err.Error())
 			}

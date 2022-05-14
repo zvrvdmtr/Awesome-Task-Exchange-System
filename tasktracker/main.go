@@ -55,6 +55,13 @@ func init() {
 	if err != nil {
 		log.Fatalf("Migration failed %s", err.Error())
 	}
+
+	// Add new field to DB
+	//_, err = conn.Exec(context.Background(), `
+	//ALTER TABLE  tasks ADD COLUMN jira_id TEXT`)
+	//if err != nil {
+	//	log.Fatalf("Migration failed %s", err.Error())
+	//}
 }
 
 func main() {

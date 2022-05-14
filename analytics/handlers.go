@@ -4,7 +4,7 @@ import (
 	"net/http"
 )
 
-func mostExpensiveTaskByPeriod() http.HandlerFunc {
+func MostExpensiveTaskByPeriod() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 	}

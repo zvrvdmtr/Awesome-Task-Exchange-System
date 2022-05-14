@@ -135,11 +135,11 @@ func main() {
 	moneyMessages, err := channel.Consume(moneyQueue.Name, "", true, false, false, false, nil)
 
 	http.HandleFunc("/daily", DailyResult())
-	http.HandleFunc("/daily", mostExpensiveTaskByPeriod())
+	http.HandleFunc("/task/period", MostExpensiveTaskByPeriod())
 
 	//run service
 	go func() {
-		if err := http.ListenAndServe(":8081", nil); err != nil {
+		if err := http.ListenAndServe(":8082", nil); err != nil {
 			log.Fatalf("listen: %s\n", err)
 		}
 		stop()

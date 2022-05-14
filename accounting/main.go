@@ -23,6 +23,7 @@ type UserEvent struct {
 }
 
 type TaskEvent struct {
+	JiraID      string    `json:"jira_id"`
 	Description string    `json:"description"`
 	IsOpen      bool      `json:"is_open"`
 	PopugID     string    `json:"popug_id"`
