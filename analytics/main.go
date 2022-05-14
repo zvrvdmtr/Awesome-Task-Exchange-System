@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,6 +67,9 @@ func init() {
 }
 
 func main() {
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	// db connection
 	conn, err := pgx.Connect(context.Background(), "postgres://postgres:postgres@localhost:5435/postgres")
@@ -128,7 +134,17 @@ func main() {
 	}
 	moneyMessages, err := channel.Consume(moneyQueue.Name, "", true, false, false, false, nil)
 
-	forever := make(chan bool)
+	http.HandleFunc("/daily", DailyResult())
+	http.HandleFunc("/daily", mostExpensiveTaskByPeriod())
+
+	//run service
+	go func() {
+		if err := http.ListenAndServe(":8081", nil); err != nil {
+			log.Fatalf("listen: %s\n", err)
+		}
+		stop()
+	}()
+	log.Println("Analytics service started on :8082")
 
 	//start listen rmq
 	go func() {
@@ -184,8 +200,7 @@ func main() {
 			}
 		}
 	}()
-
 	log.Println("Waiting for messages. To exit press CTRL+C")
-	<-forever
 
+	<-ctx.Done()
 }
