@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -43,8 +42,9 @@ func Registration(clientStore *pg.ClientStore, channel *amqp.Channel, client *ht
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 			}
-
-			fmt.Println(resp.StatusCode)
+			if resp.StatusCode != http.StatusOK {
+				http.Error(w, ErrInvalidSchema.Error(), http.StatusBadRequest)
+			}
 
 			err = channel.Publish(
 				"authService.userRegistered",

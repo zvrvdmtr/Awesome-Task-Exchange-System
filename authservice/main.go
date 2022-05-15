@@ -30,6 +30,8 @@ type User struct {
 // TODO add separate file for entities
 // TODO queue naming
 
+var ErrInvalidSchema = errors.New("Invalid event schema")
+
 func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

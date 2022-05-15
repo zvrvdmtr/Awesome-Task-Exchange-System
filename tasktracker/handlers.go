@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -106,7 +107,7 @@ func TasksList(connection *pgx.Conn) http.HandlerFunc {
 	}
 }
 
-func AddTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
+func AddTask(connection *pgx.Conn, channel *amqp.Channel, client *http.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			body, err := ioutil.ReadAll(r.Body)
@@ -141,6 +142,18 @@ func AddTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
 				http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 			}
 			log.Print(string(byteEvent))
+
+			request, err := http.NewRequest("POST", "http://localhost:8083/validate_task", bytes.NewReader(byteEvent))
+			if err != nil {
+				log.Printf("can`t build new request: %s", err.Error())
+			}
+			resp, err := client.Do(request)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			}
+			if resp.StatusCode != http.StatusOK {
+				http.Error(w, ErrInvalidSchema.Error(), http.StatusBadRequest)
+			}
 
 			err = channel.Publish(
 				"trackerService.TaskStatus",

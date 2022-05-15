@@ -27,8 +27,9 @@ type UserEvent struct {
 }
 
 var (
-	ErrSomething  = errors.New("Something goes wrong")
-	ErrParseToken = errors.New("Error parse token")
+	ErrSomething     = errors.New("Something goes wrong")
+	ErrParseToken    = errors.New("Error parse token")
+	ErrInvalidSchema = errors.New("Invalid event schema")
 )
 
 func init() {
@@ -112,7 +113,7 @@ func main() {
 	client := http.Client{Timeout: 1 * time.Second}
 	http.HandleFunc("/auth", Authorization(&client))
 	http.HandleFunc("/tasks", ValidateTokenMiddleware(TasksList(conn), &client))
-	http.HandleFunc("/tasks/add", ValidateTokenMiddleware(AddTask(conn, channel), &client))
+	http.HandleFunc("/tasks/add", ValidateTokenMiddleware(AddTask(conn, channel, &client), &client))
 	http.HandleFunc("/tasks/shuffle", IsAdminMiddleware(ValidateTokenMiddleware(ShuffleTasks(conn, channel), &client), conn))
 	http.HandleFunc("/tasks/close", CurrentUserMiddleware(CloseTask(conn, channel), conn))
 
