@@ -11,6 +11,8 @@ import (
 	"github.com/xeipuuv/gojsonschema"
 )
 
+// TODO Replace JSON schema to Protobuf schema
+
 func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

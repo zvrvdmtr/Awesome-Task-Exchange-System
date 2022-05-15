@@ -19,6 +19,8 @@ import (
 // TODO move sql migration to .sql files
 // TODO pass data from middleware to handler
 // TODO add separate file for entities
+// TODO add separate file for entities
+// TODO fix application architecture according new knowledge
 
 type UserEvent struct {
 	ClientID     string `json:"ClientID"`

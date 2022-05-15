@@ -16,6 +16,9 @@ import (
 	"github.com/streadway/amqp"
 )
 
+// TODO add separate file for entities
+// TODO add .sql files for migrations
+
 type UserEvent struct {
 	ClientID     string `json:"ClientID"`
 	ClientSecret string `json:"ClientSecret"`
