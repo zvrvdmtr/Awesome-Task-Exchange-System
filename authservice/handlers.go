@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -11,7 +13,7 @@ import (
 	pg "github.com/vgarvardt/go-oauth2-pg/v4"
 )
 
-func Registration(clientStore *pg.ClientStore, channel *amqp.Channel) http.HandlerFunc {
+func Registration(clientStore *pg.ClientStore, channel *amqp.Channel, client *http.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			body, err := ioutil.ReadAll(r.Body)
@@ -33,8 +35,16 @@ func Registration(clientStore *pg.ClientStore, channel *amqp.Channel) http.Handl
 			if err != nil {
 				log.Printf("can`t add new user: %s", err.Error())
 			}
+			request, err := http.NewRequest("POST", "http://localhost:8083/validate_client", bytes.NewReader(body))
+			if err != nil {
+				log.Printf("can`t build new request: %s", err.Error())
+			}
+			resp, err := client.Do(request)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			}
 
-			w.Header().Set("Content-Type", "application/json")
+			fmt.Println(resp.StatusCode)
 
 			err = channel.Publish(
 				"authService.userRegistered",
@@ -50,6 +60,7 @@ func Registration(clientStore *pg.ClientStore, channel *amqp.Channel) http.Handl
 				log.Printf("failed to publish a message: %s", body)
 			}
 
+			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{
 				"CLIENT_ID":     newUser.ClientID,
 				"CLIENT_SECRET": newUser.ClientSecret,

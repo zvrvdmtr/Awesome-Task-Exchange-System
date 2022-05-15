@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Client",
+  "description": "JSON schema for client event (version 1)",
+  "type": "object",
+  "definitions": {
+    "ClientID": {
+      "type": "string"
+    },
+    "Role": {
+      "type": "string"
+    }
+  },
+
+  "properties": {
+    "event_id":      { "type": "string" },
+    "event_version": { "enum": [1] },
+    "event_name":    { "type": "string" },
+    "event_time":    { "type": "string" },
+    "producer":      { "type": "string" }
+  },
+  "required": [
+    "ClientID",
+    "Role"
+  ]
+}
