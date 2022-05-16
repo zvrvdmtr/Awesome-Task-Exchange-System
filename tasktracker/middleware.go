@@ -22,6 +22,7 @@ type UserDBItem struct {
 type TaskEntity struct {
 	ID          int       `db:"id"`
 	Description string    `db:"description"`
+	JiraID      string    `db:"jira_id"`
 	IsOpen      bool      `db:"is_open"`
 	PopugID     string    `db:"popug_id"`
 	PublicID    uuid.UUID `db:"public_id"`

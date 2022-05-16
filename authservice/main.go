@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/go-oauth2/oauth2/v4/errors"
 	"github.com/go-oauth2/oauth2/v4/generates"
@@ -28,6 +29,8 @@ type User struct {
 // TODO figure out with OAuth library and maybe substitute it to another
 // TODO add separate file for entities
 // TODO queue naming
+
+var ErrInvalidSchema = errors.New("Invalid event schema")
 
 func main() {
 
@@ -84,8 +87,10 @@ func main() {
 		log.Printf("Response Error: %s", re.Error.Error())
 	})
 
+	client := http.Client{Timeout: 1 * time.Second}
+
 	// handlers
-	http.HandleFunc("/registration", Registration(clientStore, channel))
+	http.HandleFunc("/registration", Registration(clientStore, channel, &client))
 	http.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		srv.HandleTokenRequest(w, r)
 	})

@@ -19,6 +19,8 @@ import (
 // TODO move sql migration to .sql files
 // TODO pass data from middleware to handler
 // TODO add separate file for entities
+// TODO add separate file for entities
+// TODO fix application architecture according new knowledge
 
 type UserEvent struct {
 	ClientID     string `json:"ClientID"`
@@ -27,8 +29,9 @@ type UserEvent struct {
 }
 
 var (
-	ErrSomething  = errors.New("Something goes wrong")
-	ErrParseToken = errors.New("Error parse token")
+	ErrSomething     = errors.New("Something goes wrong")
+	ErrParseToken    = errors.New("Error parse token")
+	ErrInvalidSchema = errors.New("Invalid event schema")
 )
 
 func init() {
@@ -55,6 +58,13 @@ func init() {
 	if err != nil {
 		log.Fatalf("Migration failed %s", err.Error())
 	}
+
+	// Add new field to DB
+	//_, err = conn.Exec(context.Background(), `
+	//ALTER TABLE  tasks ADD COLUMN jira_id TEXT`)
+	//if err != nil {
+	//	log.Fatalf("Migration failed %s", err.Error())
+	//}
 }
 
 func main() {
@@ -105,7 +115,7 @@ func main() {
 	client := http.Client{Timeout: 1 * time.Second}
 	http.HandleFunc("/auth", Authorization(&client))
 	http.HandleFunc("/tasks", ValidateTokenMiddleware(TasksList(conn), &client))
-	http.HandleFunc("/tasks/add", ValidateTokenMiddleware(AddTask(conn, channel), &client))
+	http.HandleFunc("/tasks/add", ValidateTokenMiddleware(AddTask(conn, channel, &client), &client))
 	http.HandleFunc("/tasks/shuffle", IsAdminMiddleware(ValidateTokenMiddleware(ShuffleTasks(conn, channel), &client), conn))
 	http.HandleFunc("/tasks/close", CurrentUserMiddleware(CloseTask(conn, channel), conn))
 

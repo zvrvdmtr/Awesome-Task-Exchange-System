@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Task",
+  "description": "JSON schema for task event (version 1)",
+  "type": "object",
+  "definitions": {
+    "jira_id": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "is_open": {
+      "type": "boolean"
+    },
+    "popug_id": {
+      "type": "string"
+    },
+    "public_id": {
+      "type": "string"
+    }
+  },
+
+  "properties": {
+    "event_id":      { "type": "string" },
+    "event_version": { "enum": [1] },
+    "event_name":    { "type": "string" },
+    "event_time":    { "type": "string" },
+    "producer":      { "type": "string" }
+  },
+  "required": [
+    "jira_id",
+    "description",
+    "is_open",
+    "popug_id",
+    "public_id"
+  ]
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,12 +21,14 @@ type User struct {
 }
 
 type Task struct {
-	Description string `json:"Description"`
-	IsOpen      bool   `json:"Is_open"`
-	PopugID     string `json:"PopugID"`
+	Description string `json:"description"`
+	JiraID      string `json:"jira_id"`
+	IsOpen      bool   `json:"is_open"`
+	PopugID     string `json:"popug_id"`
 }
 
 type TaskEvent struct {
+	JiraID      string    `json:"jira_id"`
 	Description string    `json:"description"`
 	IsOpen      bool      `json:"is_open"`
 	PopugID     string    `json:"popug_id"`
@@ -82,14 +85,18 @@ func TasksList(connection *pgx.Conn) http.HandlerFunc {
 			http.Error(w, ErrParseToken.Error(), http.StatusBadRequest)
 			return
 		}
-		rows, err := connection.Query(context.Background(), "SELECT id, description, is_open, popug_id FROM tasks where popug_id = $1", claims.StandardClaims.Audience)
+		rows, err := connection.Query(
+			context.Background(),
+			"SELECT id, jira_id, description, is_open, popug_id FROM tasks where popug_id = $1",
+			claims.StandardClaims.Audience,
+		)
 		if err != nil {
 			http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 		}
 		tasks := make([]TaskEntity, 0)
 		for rows.Next() {
 			var task TaskEntity
-			err = rows.Scan(&task.ID, &task.Description, &task.IsOpen, &task.PopugID)
+			err = rows.Scan(&task.ID, &task.JiraID, &task.Description, &task.IsOpen, &task.PopugID)
 			if err != nil {
 				log.Printf("error while parse: %s", err.Error())
 			}
@@ -100,7 +107,7 @@ func TasksList(connection *pgx.Conn) http.HandlerFunc {
 	}
 }
 
-func AddTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
+func AddTask(connection *pgx.Conn, channel *amqp.Channel, client *http.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			body, err := ioutil.ReadAll(r.Body)
@@ -117,7 +124,15 @@ func AddTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
 			taskUUID := uuid.New()
 			taskEvent := fromTaskToEvent(task, taskUUID)
 
-			_, err = connection.Exec(context.Background(), "INSERT INTO tasks (description, is_open, popug_id, public_id) VALUES ($1, $2, $3, $4)", task.Description, task.IsOpen, task.PopugID, taskUUID)
+			_, err = connection.Exec(
+				context.Background(),
+				"INSERT INTO tasks (description, jira_id, is_open, popug_id, public_id) VALUES ($1, $2, $3, $4, $5)",
+				task.Description,
+				task.JiraID,
+				task.IsOpen,
+				task.PopugID,
+				taskUUID,
+			)
 			if err != nil {
 				log.Printf("can`t insert to DB: %s", err.Error())
 			}
@@ -127,6 +142,18 @@ func AddTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
 				http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 			}
 			log.Print(string(byteEvent))
+
+			request, err := http.NewRequest("POST", "http://localhost:8083/validate_task", bytes.NewReader(byteEvent))
+			if err != nil {
+				log.Printf("can`t build new request: %s", err.Error())
+			}
+			resp, err := client.Do(request)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			}
+			if resp.StatusCode != http.StatusOK {
+				http.Error(w, ErrInvalidSchema.Error(), http.StatusBadRequest)
+			}
 
 			err = channel.Publish(
 				"trackerService.TaskStatus",
