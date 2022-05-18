@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/streadway/amqp"
 )
@@ -35,51 +36,92 @@ func TaskEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery, channe
 		err := json.Unmarshal(message.Body, &task)
 		if err != nil {
 			log.Printf("can`t unmarshal body to struct: %s", err.Error())
-		}
-		var money int
-		switch task.IsOpen {
-		case true:
-			money = rand.Intn(-10-(-20)) + (-20)
-		case false:
-			money = rand.Intn(40-20) + 20
-			byteEvent, err := json.Marshal(TaskWithMoneyAndDateEvent{
-				Money:    money,
-				PublicID: task.PublicID,
-				Date:     time.Now(),
-			})
+			err = message.Reject(true)
 			if err != nil {
-				log.Printf("can`t marshal struct to body: %s", err.Error())
+				log.Printf("can`t reject message: %s", err.Error())
 			}
-			channel.Publish(
-				"accountingService.TaskStatus",
-				"",
-				false,
-				false,
-				amqp.Publishing{
-					ContentType: "application/json",
-					Body:        byteEvent,
-				})
-		}
+		} else {
+			var money int
+			switch task.IsOpen {
+			case true:
+				money = rand.Intn(-10-(-20)) + (-20)
+				err = UpdateAccountAndAddLogRecord(conn, money, task.PopugID, task.PublicID)
+				if err != nil {
+					log.Printf("Error: %s", err.Error())
+					err = message.Reject(true)
+					if err != nil {
+						log.Printf("can`t reject message: %s", err.Error())
+					}
+				} else {
+					message.Ack(false)
+				}
+			case false:
+				money = rand.Intn(40-20) + 20
+				err = UpdateAccountAndAddLogRecord(conn, money, task.PopugID, task.PublicID)
+				if err != nil {
+					log.Printf("Error: %s", err.Error())
+					err = message.Reject(true)
+					if err != nil {
+						log.Printf("can`t reject message: %s", err.Error())
+					}
+				} else {
+					byteEvent, err := json.Marshal(TaskWithMoneyAndDateEvent{
+						Money:    money,
+						PublicID: task.PublicID,
+						Date:     time.Now(),
+					})
+					if err != nil {
+						log.Printf("can`t marshal struct to body: %s", err.Error())
+						err = message.Reject(true)
+						if err != nil {
+							log.Printf("can`t reject message: %s", err.Error())
+						}
+					}
 
-		var accountID int
-
-		row := conn.QueryRow(
-			context.Background(),
-			"UPDATE accounts SET money=money+$1 WHERE popug_id=$2 RETURNING id", money, task.PopugID)
-		if err != nil {
-			log.Printf("can`t insert to DB: %s", err.Error())
-		}
-
-		err = row.Scan(&accountID)
-		if err != nil {
-			log.Fatalf("Can't scan row %s", err.Error())
-		}
-
-		_, err = conn.Exec(
-			context.Background(),
-			"INSERT INTO logs (money, public_id, date, account_id) VALUES ($1, $2, $3, $4)", money, task.PublicID, time.Now(), accountID)
-		if err != nil {
-			log.Printf("can`t insert to DB: %s", err.Error())
+					err = channel.Publish(
+						"accountingService.TaskStatus",
+						"",
+						false,
+						false,
+						amqp.Publishing{
+							ContentType: "application/json",
+							Body:        byteEvent,
+						},
+					)
+					if err != nil {
+						log.Printf("can`t publish message: %s", err.Error())
+						err = message.Reject(true)
+						if err != nil {
+							log.Printf("can`t reject message: %s", err.Error())
+						}
+					}
+					message.Ack(false)
+				}
+			}
 		}
 	}
+}
+
+func UpdateAccountAndAddLogRecord(conn *pgxpool.Pool, money int, popugID string, public uuid.UUID) error {
+	var accountID int
+	row := conn.QueryRow(
+		context.Background(),
+		"UPDATE accounts SET money=money+$1 WHERE popug_id=$2 RETURNING id", money, popugID,
+	)
+
+	err := row.Scan(&accountID)
+	if err != nil {
+		log.Printf("Can't scan row %s", err.Error())
+		return err
+	}
+
+	_, err = conn.Exec(
+		context.Background(),
+		"INSERT INTO logs (money, public_id, date, account_id) VALUES ($1, $2, $3, $4)", money, public, time.Now(), accountID)
+	if err != nil {
+		log.Printf("can`t insert to DB: %s", err.Error())
+		return err
+	}
+
+	return nil
 }

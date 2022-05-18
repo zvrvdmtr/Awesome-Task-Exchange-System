@@ -157,7 +157,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Can`t declare queue: %s", err.Error())
 	}
-	taskMessages, err := channel.Consume(taskQueue.Name, "", true, false, false, false, nil)
+	taskMessages, err := channel.Consume(taskQueue.Name, "", false, false, false, false, nil)
 
 	// money events
 	err = channel.ExchangeDeclare("accountingService.TaskStatus", "fanout", true, false, false, false, nil)
