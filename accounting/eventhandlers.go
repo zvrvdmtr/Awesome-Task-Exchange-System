@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
 	"time"
@@ -16,16 +17,33 @@ func UserEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery) {
 	for message := range messages {
 		var user UserEvent
 		err := json.Unmarshal(message.Body, &user)
+		fmt.Println(user)
 		if err != nil {
 			log.Printf("can`t unmarshal body to struct: %s", err.Error())
-		}
-		_, err = conn.Exec(context.Background(), "INSERT INTO clients (id, secret, domain) VALUES ($1, $2, $3)", user.ClientID, user.ClientSecret, user.Role)
-		if err != nil {
-			log.Printf("can`t insert to DB: %s", err.Error())
-		}
-		_, err = conn.Exec(context.Background(), "INSERT INTO accounts (money, popug_id) VALUES ($1, $2)", 0, user.ClientID)
-		if err != nil {
-			log.Printf("can`t insert to DB: %s", err.Error())
+			err = message.Reject(true)
+			if err != nil {
+				log.Printf("can`t reject message: %s", err.Error())
+			}
+		} else {
+			// TODO add transaction
+			_, err = conn.Exec(context.Background(), "INSERT INTO clients (id, secret, domain) VALUES ($1, $2, $3)", user.ClientID, user.ClientSecret, user.Role)
+			if err != nil {
+				log.Printf("can`t insert to DB: %s", err.Error())
+				err = message.Reject(true)
+				if err != nil {
+					log.Printf("can`t reject message: %s", err.Error())
+				}
+			}
+			_, err = conn.Exec(context.Background(), "INSERT INTO accounts (money, popug_id) VALUES ($1, $2)", 0, user.ClientID)
+			if err != nil {
+				log.Printf("can`t insert to DB: %s", err.Error())
+				err = message.Reject(true)
+				if err != nil {
+					log.Printf("can`t reject message: %s", err.Error())
+				}
+			} else {
+				message.Ack(false)
+			}
 		}
 	}
 }
@@ -34,6 +52,7 @@ func TaskEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery, channe
 	for message := range messages {
 		var task TaskEvent
 		err := json.Unmarshal(message.Body, &task)
+		fmt.Println(task)
 		if err != nil {
 			log.Printf("can`t unmarshal body to struct: %s", err.Error())
 			err = message.Reject(true)

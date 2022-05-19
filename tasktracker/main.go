@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os/signal"
@@ -21,6 +22,7 @@ import (
 // TODO add separate file for entities
 // TODO add separate file for entities
 // TODO fix application architecture according new knowledge
+// TODO add docker compose file
 
 type UserEvent struct {
 	ClientID     string `json:"ClientID"`
@@ -87,6 +89,11 @@ func main() {
 	}
 	defer channel.Close()
 
+	// publish confirmation
+	channel.Confirm(false)
+	confirmation := make(chan amqp.Confirmation)
+	channel.NotifyPublish(confirmation)
+
 	err = channel.ExchangeDeclare("authService.userRegistered", "fanout", true, false, false, false, nil)
 	if err != nil {
 		log.Fatalf("Can`t create exchange: %s", err.Error())
@@ -109,13 +116,13 @@ func main() {
 		log.Fatalf("Can`t declare queue: %s", err.Error())
 	}
 
-	messages, err := channel.Consume(queue.Name, "", true, false, false, false, nil)
+	messages, err := channel.Consume(queue.Name, "", false, false, false, false, nil)
 
 	//handlers
 	client := http.Client{Timeout: 1 * time.Second}
 	http.HandleFunc("/auth", Authorization(&client))
 	http.HandleFunc("/tasks", ValidateTokenMiddleware(TasksList(conn), &client))
-	http.HandleFunc("/tasks/add", ValidateTokenMiddleware(AddTask(conn, channel, &client), &client))
+	http.HandleFunc("/tasks/add", ValidateTokenMiddleware(AddTask(conn, channel, &client, confirmation), &client))
 	http.HandleFunc("/tasks/shuffle", IsAdminMiddleware(ValidateTokenMiddleware(ShuffleTasks(conn, channel), &client), conn))
 	http.HandleFunc("/tasks/close", CurrentUserMiddleware(CloseTask(conn, channel), conn))
 
@@ -133,12 +140,24 @@ func main() {
 		for message := range messages {
 			var user UserEvent
 			err = json.Unmarshal(message.Body, &user)
+			fmt.Println(user)
 			if err != nil {
 				log.Printf("can`t unmarshal body to struct: %s", err.Error())
-			}
-			_, err = conn.Exec(context.Background(), "INSERT INTO clients (id, secret, domain) VALUES ($1, $2, $3)", user.ClientID, user.ClientSecret, user.Role)
-			if err != nil {
-				log.Printf("can`t insert to DB: %s", err.Error())
+				err = message.Reject(true)
+				if err != nil {
+					log.Printf("can`t reject message: %s", err.Error())
+				}
+			} else {
+				_, err = conn.Exec(context.Background(), "INSERT INTO clients (id, secret, domain) VALUES ($1, $2, $3)", user.ClientID, user.ClientSecret, user.Role)
+				if err != nil {
+					log.Printf("can`t insert to DB: %s", err.Error())
+					err = message.Reject(true)
+					if err != nil {
+						log.Printf("can`t reject message: %s", err.Error())
+					}
+				} else {
+					message.Ack(false)
+				}
 			}
 
 		}

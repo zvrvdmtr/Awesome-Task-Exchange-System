@@ -107,7 +107,7 @@ func TasksList(connection *pgx.Conn) http.HandlerFunc {
 	}
 }
 
-func AddTask(connection *pgx.Conn, channel *amqp.Channel, client *http.Client) http.HandlerFunc {
+func AddTask(connection *pgx.Conn, channel *amqp.Channel, client *http.Client, confirmation chan amqp.Confirmation) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			body, err := ioutil.ReadAll(r.Body)
@@ -168,7 +168,11 @@ func AddTask(connection *pgx.Conn, channel *amqp.Channel, client *http.Client) h
 				log.Printf("can`t publish message: %s", err.Error())
 			}
 
-			//TODO: Add CUD to analytics service
+			//TODO: add re-publish if no ACK
+			confirm := <-confirmation
+			fmt.Println(confirm.Ack)
+
+			//TODO: add CUD to analytics service
 
 			w.Write([]byte("Ok!"))
 		} else {

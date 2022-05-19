@@ -57,7 +57,7 @@ func Registration(clientStore *pg.ClientStore, channel *amqp.Channel, client *ht
 				})
 
 			if err != nil {
-				log.Printf("failed to publish a message: %s", body)
+				log.Printf("failed to publish a message: %s", err.Error())
 			}
 
 			w.Header().Set("Content-Type", "application/json")
