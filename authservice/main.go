@@ -55,6 +55,11 @@ func main() {
 	}
 	defer channel.Close()
 
+	// publish confirmation
+	//channel.Confirm(false)
+	//confirmation := make(chan amqp.Confirmation)
+	//channel.NotifyPublish(confirmation)
+
 	err = channel.ExchangeDeclare("authService.userRegistered", "fanout", true, false, false, false, nil)
 	if err != nil {
 		log.Fatalf("Can`t create exchange: %s", err.Error())

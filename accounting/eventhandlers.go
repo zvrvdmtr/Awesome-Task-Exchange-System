@@ -17,7 +17,6 @@ func UserEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery) {
 	for message := range messages {
 		var user UserEvent
 		err := json.Unmarshal(message.Body, &user)
-		fmt.Println(user)
 		if err != nil {
 			log.Printf("can`t unmarshal body to struct: %s", err.Error())
 			err = message.Reject(true)
@@ -25,7 +24,6 @@ func UserEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery) {
 				log.Printf("can`t reject message: %s", err.Error())
 			}
 		} else {
-			// TODO add transaction
 			_, err = conn.Exec(context.Background(), "INSERT INTO clients (id, secret, domain) VALUES ($1, $2, $3)", user.ClientID, user.ClientSecret, user.Role)
 			if err != nil {
 				log.Printf("can`t insert to DB: %s", err.Error())
@@ -48,6 +46,7 @@ func UserEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery) {
 	}
 }
 
+// TaskEventsHandler TODO do something with this function it's a mess
 func TaskEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery, channel *amqp.Channel) {
 	for message := range messages {
 		var task TaskEvent
