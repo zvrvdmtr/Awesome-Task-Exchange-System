@@ -168,9 +168,12 @@ func AddTask(connection *pgx.Conn, channel *amqp.Channel, client *http.Client, c
 				log.Printf("can`t publish message: %s", err.Error())
 			}
 
-			//TODO: add re-publish if no ACK
 			confirm := <-confirmation
-			fmt.Println(confirm.Ack)
+			if confirm.Ack {
+				log.Printf("published message: %s", byteEvent)
+			} else {
+				log.Printf("failed to publish a message %s, error: %s", byteEvent, err.Error())
+			}
 
 			//TODO: add CUD to analytics service
 
@@ -181,7 +184,7 @@ func AddTask(connection *pgx.Conn, channel *amqp.Channel, client *http.Client, c
 	}
 }
 
-func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
+func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel, confirmation chan amqp.Confirmation) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 
@@ -242,7 +245,6 @@ func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc 
 				if err != nil {
 					http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 				}
-				log.Print(string(byteEvent))
 
 				err = channel.Publish(
 					"trackerService.TaskStatus",
@@ -256,6 +258,12 @@ func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc 
 				if err != nil {
 					log.Printf("can`t publish message: %s", err.Error())
 				}
+				confirm := <-confirmation
+				if confirm.Ack {
+					log.Printf("published message: %s", byteEvent)
+				} else {
+					log.Printf("failed to publish a message %s, error: %s", byteEvent, err.Error())
+				}
 			}
 
 			//TODO: Add CUD to analytics service
@@ -266,7 +274,7 @@ func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc 
 	}
 }
 
-func CloseTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
+func CloseTask(connection *pgx.Conn, channel *amqp.Channel, confirmation chan amqp.Confirmation) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		taskID := r.URL.Query().Get("task")
 		rows := connection.QueryRow(context.Background(), "UPDATE tasks SET is_open = $1 where id = $2 RETURNING is_open, public_id, popug_id", false, taskID)
@@ -300,6 +308,13 @@ func CloseTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
 			})
 		if err != nil {
 			log.Printf("can`t publish message: %s", err.Error())
+		}
+
+		confirm := <-confirmation
+		if confirm.Ack {
+			log.Printf("published message: %s", byteEvent)
+		} else {
+			log.Printf("failed to publish a message %s, error: %s", byteEvent, err.Error())
 		}
 
 		//TODO: Add CUD to analytics service

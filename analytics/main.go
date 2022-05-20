@@ -8,65 +8,17 @@ import (
 	"net/http"
 	"os/signal"
 	"syscall"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4"
 	"github.com/streadway/amqp"
 )
 
-type UserEvent struct {
-	ClientID     string `json:"ClientID"`
-	ClientSecret string `json:"ClientSecret"`
-	Role         string `json:"Role"`
-}
-
-type TaskEvent struct {
-	Money    int
-	Date     time.Time
-	PublicID uuid.UUID
-}
-
-type DailyMoneyEvent struct {
-	Money   int
-	Date    time.Time
-	PopugID string
-}
-
-func init() {
-	conn, _ := pgx.Connect(context.Background(), "postgres://postgres:postgres@localhost:5435/postgres")
-	conn.Exec(context.Background(), `
-	CREATE TABLE IF NOT EXISTS clients (
-	  id     	 TEXT  NOT NULL,
-	  secret 	 TEXT  NOT NULL,
-	  domain 	 TEXT  NOT NULL,
-	  CONSTRAINT clients_pkey PRIMARY KEY (id)
-	);`)
-
-	_, err := conn.Exec(context.Background(), `
-	CREATE TABLE IF NOT EXISTS closed_tasks (
-	  id 			bigserial PRIMARY KEY,
-	  money		    INTEGER   NOT NULL,
-	  public_id		UUID 	  NOT NULL,
-	  date			DATE	  NOT NULL
-	);`)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	_, err = conn.Exec(context.Background(), `
-	CREATE TABLE IF NOT EXISTS daily_money (
-	  id 			bigserial PRIMARY KEY,
-	  money		    INTEGER   NOT NULL,
-	  popug_id		TEXT 	  NOT NULL,
-	  date			DATE	  NOT NULL
-	);`)
-	if err != nil {
-		fmt.Println(err)
-	}
-}
-
 func main() {
+
+	err := RunMigrations()
+	if err != nil {
+		log.Fatalf("Migrations failed: %s", err.Error())
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

@@ -10,66 +10,22 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-oauth2/oauth2/v4/errors"
 	"github.com/jackc/pgx/v4"
 	"github.com/streadway/amqp"
 )
 
 // TODO add context to handlers
 // TODO move rmq connection and consuming to separate file
-// TODO move sql migration to .sql files
 // TODO pass data from middleware to handler
-// TODO add separate file for entities
-// TODO add separate file for entities
-// TODO fix application architecture according new knowledge
 // TODO add docker compose file
 
-type UserEvent struct {
-	ClientID     string `json:"ClientID"`
-	ClientSecret string `json:"ClientSecret"`
-	Role         string `json:"Role"`
-}
-
-var (
-	ErrSomething     = errors.New("Something goes wrong")
-	ErrParseToken    = errors.New("Error parse token")
-	ErrInvalidSchema = errors.New("Invalid event schema")
-)
-
-func init() {
-	conn, _ := pgx.Connect(context.Background(), "postgres://postgres:postgres@localhost:5433/postgres")
-	_, err := conn.Exec(context.Background(), `
-	CREATE TABLE IF NOT EXISTS clients (
-	  id     	 TEXT  NOT NULL,
-	  secret 	 TEXT  NOT NULL,
-	  domain 	 TEXT  NOT NULL,
-	  CONSTRAINT clients_pkey PRIMARY KEY (id)
-	);`)
-	if err != nil {
-		log.Fatalf("Migration failed %s", err.Error())
-	}
-
-	_, err = conn.Exec(context.Background(), `
-	CREATE TABLE IF NOT EXISTS tasks (
-	  id 			bigserial PRIMARY KEY,
-	  description   TEXT 	  NOT NULL,
-	  is_open		bool 	  NOT NULL,
-	  public_id		UUID 	  NOT NULL,
-	  popug_id 		TEXT 	  REFERENCES clients (id)
-	);`)
-	if err != nil {
-		log.Fatalf("Migration failed %s", err.Error())
-	}
-
-	// Add new field to DB
-	//_, err = conn.Exec(context.Background(), `
-	//ALTER TABLE  tasks ADD COLUMN jira_id TEXT`)
-	//if err != nil {
-	//	log.Fatalf("Migration failed %s", err.Error())
-	//}
-}
-
 func main() {
+
+	err := RunMigrations()
+	if err != nil {
+		log.Fatalf("Migrations failed: %s", err.Error())
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -123,8 +79,8 @@ func main() {
 	http.HandleFunc("/auth", Authorization(&client))
 	http.HandleFunc("/tasks", ValidateTokenMiddleware(TasksList(conn), &client))
 	http.HandleFunc("/tasks/add", ValidateTokenMiddleware(AddTask(conn, channel, &client, confirmation), &client))
-	http.HandleFunc("/tasks/shuffle", IsAdminMiddleware(ValidateTokenMiddleware(ShuffleTasks(conn, channel), &client), conn))
-	http.HandleFunc("/tasks/close", CurrentUserMiddleware(CloseTask(conn, channel), conn))
+	http.HandleFunc("/tasks/shuffle", IsAdminMiddleware(ValidateTokenMiddleware(ShuffleTasks(conn, channel, confirmation), &client), conn))
+	http.HandleFunc("/tasks/close", CurrentUserMiddleware(CloseTask(conn, channel, confirmation), conn))
 
 	//run service
 	go func() {

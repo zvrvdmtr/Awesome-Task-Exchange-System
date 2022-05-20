@@ -55,10 +55,10 @@ func main() {
 	}
 	defer channel.Close()
 
-	// publish confirmation
-	//channel.Confirm(false)
-	//confirmation := make(chan amqp.Confirmation)
-	//channel.NotifyPublish(confirmation)
+	//publish confirmation
+	channel.Confirm(false)
+	confirmation := make(chan amqp.Confirmation)
+	channel.NotifyPublish(confirmation)
 
 	err = channel.ExchangeDeclare("authService.userRegistered", "fanout", true, false, false, false, nil)
 	if err != nil {
@@ -95,7 +95,7 @@ func main() {
 	client := http.Client{Timeout: 1 * time.Second}
 
 	// handlers
-	http.HandleFunc("/registration", Registration(clientStore, channel, &client))
+	http.HandleFunc("/registration", Registration(clientStore, channel, &client, confirmation))
 	http.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		srv.HandleTokenRequest(w, r)
 	})
