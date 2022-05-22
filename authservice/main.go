@@ -27,7 +27,6 @@ type User struct {
 }
 
 // TODO figure out with OAuth library and maybe substitute it to another
-// TODO add separate file for entities
 // TODO queue naming
 
 var ErrInvalidSchema = errors.New("Invalid event schema")

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"math/rand"
 	"time"
@@ -24,7 +23,7 @@ func UserEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery) {
 				log.Printf("can`t reject message: %s", err.Error())
 			}
 		} else {
-			_, err = conn.Exec(context.Background(), "INSERT INTO clients (id, secret, domain) VALUES ($1, $2, $3)", user.ClientID, user.ClientSecret, user.Role)
+			_, err = conn.Exec(context.Background(), "INSERT INTO clients (secret, domain, popug_id) VALUES ($1, $2, $3)", user.ClientSecret, user.Role, user.ClientID)
 			if err != nil {
 				log.Printf("can`t insert to DB: %s", err.Error())
 				err = message.Reject(true)
@@ -46,12 +45,10 @@ func UserEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery) {
 	}
 }
 
-// TaskEventsHandler TODO do something with this function it's a mess
 func TaskEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery, channel *amqp.Channel) {
 	for message := range messages {
 		var task TaskEvent
 		err := json.Unmarshal(message.Body, &task)
-		fmt.Println(task)
 		if err != nil {
 			log.Printf("can`t unmarshal body to struct: %s", err.Error())
 			err = message.Reject(true)
@@ -83,41 +80,45 @@ func TaskEventsHandler(conn *pgxpool.Pool, messages <-chan amqp.Delivery, channe
 						log.Printf("can`t reject message: %s", err.Error())
 					}
 				} else {
-					byteEvent, err := json.Marshal(TaskWithMoneyAndDateEvent{
-						Money:    money,
-						PublicID: task.PublicID,
-						Date:     time.Now(),
-					})
+					err = PublishTaskEvent(money, task.PublicID, channel)
 					if err != nil {
-						log.Printf("can`t marshal struct to body: %s", err.Error())
+						log.Printf("Error: %s", err.Error())
 						err = message.Reject(true)
 						if err != nil {
 							log.Printf("can`t reject message: %s", err.Error())
 						}
+					} else {
+						message.Ack(false)
 					}
-
-					err = channel.Publish(
-						"accountingService.TaskStatus",
-						"",
-						false,
-						false,
-						amqp.Publishing{
-							ContentType: "application/json",
-							Body:        byteEvent,
-						},
-					)
-					if err != nil {
-						log.Printf("can`t publish message: %s", err.Error())
-						err = message.Reject(true)
-						if err != nil {
-							log.Printf("can`t reject message: %s", err.Error())
-						}
-					}
-					message.Ack(false)
 				}
 			}
 		}
 	}
+}
+
+func PublishTaskEvent(money int, publicID uuid.UUID, channel *amqp.Channel) error {
+	byteEvent, err := json.Marshal(TaskWithMoneyAndDateEvent{
+		Money:    money,
+		PublicID: publicID,
+		Date:     time.Now(),
+	})
+	if err != nil {
+		return err
+	}
+	err = channel.Publish(
+		"accountingService.TaskStatus",
+		"",
+		false,
+		false,
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        byteEvent,
+		},
+	)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func UpdateAccountAndAddLogRecord(conn *pgxpool.Pool, money int, popugID string, public uuid.UUID) error {

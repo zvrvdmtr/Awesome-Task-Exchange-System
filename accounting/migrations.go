@@ -10,10 +10,10 @@ func RunMigrations() error {
 	conn, _ := pgx.Connect(context.Background(), "postgres://postgres:postgres@localhost:5434/postgres")
 	_, err := conn.Exec(context.Background(), `
 	CREATE TABLE IF NOT EXISTS clients (
-	  id     	 TEXT  NOT NULL,
+	  id     	 bigserial PRIMARY KEY,
 	  secret 	 TEXT  NOT NULL,
 	  domain 	 TEXT  NOT NULL,
-	  CONSTRAINT clients_pkey PRIMARY KEY (id)
+	  popug_id   TEXT  UNIQUE
 	);`)
 	if err != nil {
 		return err
@@ -23,7 +23,7 @@ func RunMigrations() error {
 	CREATE TABLE IF NOT EXISTS accounts (
 	  id 			bigserial PRIMARY KEY,
 	  money		    INTEGER   NOT NULL,
-	  popug_id 		TEXT 	  REFERENCES clients (id) UNIQUE
+	  popug_id 		TEXT 	  REFERENCES clients (popug_id) UNIQUE
 	);`)
 	if err != nil {
 		return err
