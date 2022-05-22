@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/streadway/amqp"
 )
 
@@ -77,7 +78,7 @@ func Authorization(client *http.Client) http.HandlerFunc {
 	}
 }
 
-func TasksList(connection *pgx.Conn) http.HandlerFunc {
+func TasksList(connection *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.Header.Get("Authorization")
 		claims, err := parseToken(token)
@@ -107,7 +108,7 @@ func TasksList(connection *pgx.Conn) http.HandlerFunc {
 	}
 }
 
-func AddTask(connection *pgx.Conn, channel *amqp.Channel, client *http.Client, confirmation chan amqp.Confirmation) http.HandlerFunc {
+func AddTask(connection *pgxpool.Pool, channel *amqp.Channel, client *http.Client, confirmation chan amqp.Confirmation) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			body, err := ioutil.ReadAll(r.Body)
@@ -184,7 +185,7 @@ func AddTask(connection *pgx.Conn, channel *amqp.Channel, client *http.Client, c
 	}
 }
 
-func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel, confirmation chan amqp.Confirmation) http.HandlerFunc {
+func ShuffleTasks(connection *pgxpool.Pool, channel *amqp.Channel, confirmation chan amqp.Confirmation) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 
@@ -274,7 +275,7 @@ func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel, confirmation chan
 	}
 }
 
-func CloseTask(connection *pgx.Conn, channel *amqp.Channel, confirmation chan amqp.Confirmation) http.HandlerFunc {
+func CloseTask(connection *pgxpool.Pool, channel *amqp.Channel, confirmation chan amqp.Confirmation) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		taskID := r.URL.Query().Get("task")
 		rows := connection.QueryRow(context.Background(), "UPDATE tasks SET is_open = $1 where id = $2 RETURNING is_open, public_id, popug_id", false, taskID)

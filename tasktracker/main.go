@@ -2,20 +2,18 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/streadway/amqp"
 )
 
 // TODO add context to handlers
-// TODO move rmq connection and consuming to separate file
+// TODO move rmq connection to separate file
 // TODO pass data from middleware to handler
 // TODO add docker compose file
 
@@ -30,7 +28,7 @@ func main() {
 	defer stop()
 
 	// db connection
-	conn, _ := pgx.Connect(context.Background(), "postgres://postgres:postgres@localhost:5433/postgres")
+	conn, _ := pgxpool.Connect(context.Background(), "postgres://postgres:postgres@localhost:5433/postgres")
 
 	// rmq connection
 	rabbitConn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
@@ -92,32 +90,7 @@ func main() {
 	log.Println("tasks service started on :8080")
 
 	//start listen rmq
-	go func() {
-		for message := range messages {
-			var user UserEvent
-			err = json.Unmarshal(message.Body, &user)
-			fmt.Println(user)
-			if err != nil {
-				log.Printf("can`t unmarshal body to struct: %s", err.Error())
-				err = message.Reject(true)
-				if err != nil {
-					log.Printf("can`t reject message: %s", err.Error())
-				}
-			} else {
-				_, err = conn.Exec(context.Background(), "INSERT INTO clients (id, secret, domain) VALUES ($1, $2, $3)", user.ClientID, user.ClientSecret, user.Role)
-				if err != nil {
-					log.Printf("can`t insert to DB: %s", err.Error())
-					err = message.Reject(true)
-					if err != nil {
-						log.Printf("can`t reject message: %s", err.Error())
-					}
-				} else {
-					message.Ack(false)
-				}
-			}
-
-		}
-	}()
+	go UserEventHandler(conn, messages)
 
 	log.Println("Waiting for messages. To exit press CTRL+C")
 	<-ctx.Done()
