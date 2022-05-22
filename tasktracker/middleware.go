@@ -10,7 +10,7 @@ import (
 	"github.com/go-oauth2/oauth2/v4/generates"
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 type UserDBItem struct {
@@ -43,7 +43,7 @@ func parseToken(access string) (*generates.JWTAccessClaims, error) {
 	return claims, nil
 }
 
-func IsAdminMiddleware(f http.HandlerFunc, conn *pgx.Conn) http.HandlerFunc {
+func IsAdminMiddleware(f http.HandlerFunc, conn *pgxpool.Pool) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		access := r.Header.Get("Authorization")
 		claims, err := parseToken(access)
@@ -84,7 +84,7 @@ func ValidateTokenMiddleware(f http.HandlerFunc, client *http.Client) http.Handl
 	})
 }
 
-func CurrentUserMiddleware(f http.HandlerFunc, conn *pgx.Conn) http.HandlerFunc {
+func CurrentUserMiddleware(f http.HandlerFunc, conn *pgxpool.Pool) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		access := r.Header.Get("Authorization")
 		claims, err := parseToken(access)

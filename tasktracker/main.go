@@ -2,77 +2,33 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/go-oauth2/oauth2/v4/errors"
-	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/streadway/amqp"
 )
 
 // TODO add context to handlers
-// TODO move rmq connection and consuming to separate file
-// TODO move sql migration to .sql files
+// TODO move rmq connection to separate file
 // TODO pass data from middleware to handler
-// TODO add separate file for entities
-// TODO add separate file for entities
-// TODO fix application architecture according new knowledge
-
-type UserEvent struct {
-	ClientID     string `json:"ClientID"`
-	ClientSecret string `json:"ClientSecret"`
-	Role         string `json:"Role"`
-}
-
-var (
-	ErrSomething     = errors.New("Something goes wrong")
-	ErrParseToken    = errors.New("Error parse token")
-	ErrInvalidSchema = errors.New("Invalid event schema")
-)
-
-func init() {
-	conn, _ := pgx.Connect(context.Background(), "postgres://postgres:postgres@localhost:5433/postgres")
-	_, err := conn.Exec(context.Background(), `
-	CREATE TABLE IF NOT EXISTS clients (
-	  id     	 TEXT  NOT NULL,
-	  secret 	 TEXT  NOT NULL,
-	  domain 	 TEXT  NOT NULL,
-	  CONSTRAINT clients_pkey PRIMARY KEY (id)
-	);`)
-	if err != nil {
-		log.Fatalf("Migration failed %s", err.Error())
-	}
-
-	_, err = conn.Exec(context.Background(), `
-	CREATE TABLE IF NOT EXISTS tasks (
-	  id 			bigserial PRIMARY KEY,
-	  description   TEXT 	  NOT NULL,
-	  is_open		bool 	  NOT NULL,
-	  public_id		UUID 	  NOT NULL,
-	  popug_id 		TEXT 	  REFERENCES clients (id)
-	);`)
-	if err != nil {
-		log.Fatalf("Migration failed %s", err.Error())
-	}
-
-	// Add new field to DB
-	//_, err = conn.Exec(context.Background(), `
-	//ALTER TABLE  tasks ADD COLUMN jira_id TEXT`)
-	//if err != nil {
-	//	log.Fatalf("Migration failed %s", err.Error())
-	//}
-}
+// TODO add docker compose file
 
 func main() {
+
+	err := RunMigrations()
+	if err != nil {
+		log.Fatalf("Migrations failed: %s", err.Error())
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	// db connection
-	conn, _ := pgx.Connect(context.Background(), "postgres://postgres:postgres@localhost:5433/postgres")
+	conn, _ := pgxpool.Connect(context.Background(), "postgres://postgres:postgres@localhost:5433/postgres")
 
 	// rmq connection
 	rabbitConn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
@@ -86,6 +42,11 @@ func main() {
 		log.Fatalf("Can`t create channel: %s", err.Error())
 	}
 	defer channel.Close()
+
+	// publish confirmation
+	channel.Confirm(false)
+	confirmation := make(chan amqp.Confirmation)
+	channel.NotifyPublish(confirmation)
 
 	err = channel.ExchangeDeclare("authService.userRegistered", "fanout", true, false, false, false, nil)
 	if err != nil {
@@ -109,15 +70,15 @@ func main() {
 		log.Fatalf("Can`t declare queue: %s", err.Error())
 	}
 
-	messages, err := channel.Consume(queue.Name, "", true, false, false, false, nil)
+	messages, err := channel.Consume(queue.Name, "", false, false, false, false, nil)
 
 	//handlers
 	client := http.Client{Timeout: 1 * time.Second}
 	http.HandleFunc("/auth", Authorization(&client))
 	http.HandleFunc("/tasks", ValidateTokenMiddleware(TasksList(conn), &client))
-	http.HandleFunc("/tasks/add", ValidateTokenMiddleware(AddTask(conn, channel, &client), &client))
-	http.HandleFunc("/tasks/shuffle", IsAdminMiddleware(ValidateTokenMiddleware(ShuffleTasks(conn, channel), &client), conn))
-	http.HandleFunc("/tasks/close", CurrentUserMiddleware(CloseTask(conn, channel), conn))
+	http.HandleFunc("/tasks/add", ValidateTokenMiddleware(AddTask(conn, channel, &client, confirmation), &client))
+	http.HandleFunc("/tasks/shuffle", IsAdminMiddleware(ValidateTokenMiddleware(ShuffleTasks(conn, channel, confirmation), &client), conn))
+	http.HandleFunc("/tasks/close", CurrentUserMiddleware(CloseTask(conn, channel, confirmation), conn))
 
 	//run service
 	go func() {
@@ -129,20 +90,7 @@ func main() {
 	log.Println("tasks service started on :8080")
 
 	//start listen rmq
-	go func() {
-		for message := range messages {
-			var user UserEvent
-			err = json.Unmarshal(message.Body, &user)
-			if err != nil {
-				log.Printf("can`t unmarshal body to struct: %s", err.Error())
-			}
-			_, err = conn.Exec(context.Background(), "INSERT INTO clients (id, secret, domain) VALUES ($1, $2, $3)", user.ClientID, user.ClientSecret, user.Role)
-			if err != nil {
-				log.Printf("can`t insert to DB: %s", err.Error())
-			}
-
-		}
-	}()
+	go UserEventHandler(conn, messages)
 
 	log.Println("Waiting for messages. To exit press CTRL+C")
 	<-ctx.Done()

@@ -3,108 +3,27 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/streadway/amqp"
 )
-
-// TODO add separate file for entities
-// TODO add .sql files for migrations
-
-type UserEvent struct {
-	ClientID     string `json:"ClientID"`
-	ClientSecret string `json:"ClientSecret"`
-	Role         string `json:"Role"`
-}
-
-type TaskEvent struct {
-	JiraID      string    `json:"jira_id"`
-	Description string    `json:"description"`
-	IsOpen      bool      `json:"is_open"`
-	PopugID     string    `json:"popug_id"`
-	PublicID    uuid.UUID `json:"public_id"`
-}
-
-type TaskWithMoneyAndDateEvent struct {
-	PopugID  string
-	PublicID uuid.UUID
-	Money    int
-	Date     time.Time
-}
-
-type DailyMoneyEvent struct {
-	PopugID string
-	Money   int
-	Date    time.Time
-}
-
-type User struct {
-	ClientID     string `json:"ClientID"`
-	ClientSecret string `json:"ClientSecret"`
-}
-
-type LogRecordEntity struct {
-	ID        int
-	Money     int
-	PublicID  uuid.UUID
-	Date      time.Time
-	AccountID int
-}
-
-type AccountEntity struct {
-	ID      int
-	Money   int
-	PopugID int
-}
-
-type AccountWithLogs struct {
-	Account AccountEntity
-	Logs    []LogRecordEntity
-}
 
 var (
 	ErrSomething  = errors.New("something goes wrong")
 	ErrParseToken = errors.New("error parse token")
 )
 
-func init() {
-	conn, _ := pgx.Connect(context.Background(), "postgres://postgres:postgres@localhost:5434/postgres")
-	conn.Exec(context.Background(), `
-	CREATE TABLE IF NOT EXISTS clients (
-	  id     	 TEXT  NOT NULL,
-	  secret 	 TEXT  NOT NULL,
-	  domain 	 TEXT  NOT NULL,
-	  CONSTRAINT clients_pkey PRIMARY KEY (id)
-	);`)
-
-	_, err := conn.Exec(context.Background(), `
-	CREATE TABLE IF NOT EXISTS accounts (
-	  id 			bigserial PRIMARY KEY,
-	  money		    INTEGER   NOT NULL,
-	  popug_id 		TEXT 	  REFERENCES clients (id) UNIQUE
-	);`)
-	fmt.Println(err)
-
-	_, err = conn.Exec(context.Background(), `
-	CREATE TABLE IF NOT EXISTS logs (
-	  id 			bigserial PRIMARY KEY,
-	  money		    INTEGER   NOT NULL,
-	  public_id		UUID 	  NOT NULL,
-	  date			TIMESTAMP NOT NULL,
-	  account_id 	INTEGER   REFERENCES accounts (id)
-	);`)
-	fmt.Println(err)
-}
-
 func main() {
+
+	err := RunMigrations()
+	if err != nil {
+		log.Fatalf("Migrations failed: %s", err.Error())
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -129,6 +48,11 @@ func main() {
 	}
 	defer channel.Close()
 
+	// publish confirmation
+	//channel.Confirm(false)
+	//confirmation := make(chan amqp.Confirmation)
+	//channel.NotifyPublish(confirmation)
+
 	// user events
 	err = channel.ExchangeDeclare("authService.userRegistered", "fanout", true, false, false, false, nil)
 	if err != nil {
@@ -142,7 +66,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Can`t declare queue: %s", err.Error())
 	}
-	messages, err := channel.Consume(queue.Name, "", true, false, false, false, nil)
+	messages, err := channel.Consume(queue.Name, "", false, false, false, false, nil)
 
 	// task events
 	err = channel.ExchangeDeclare("trackerService.TaskStatus", "fanout", true, false, false, false, nil)
@@ -157,7 +81,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Can`t declare queue: %s", err.Error())
 	}
-	taskMessages, err := channel.Consume(taskQueue.Name, "", true, false, false, false, nil)
+	taskMessages, err := channel.Consume(taskQueue.Name, "", false, false, false, false, nil)
 
 	// money events
 	err = channel.ExchangeDeclare("accountingService.TaskStatus", "fanout", true, false, false, false, nil)

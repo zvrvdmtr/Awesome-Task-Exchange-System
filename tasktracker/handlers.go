@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/streadway/amqp"
 )
 
@@ -77,7 +78,7 @@ func Authorization(client *http.Client) http.HandlerFunc {
 	}
 }
 
-func TasksList(connection *pgx.Conn) http.HandlerFunc {
+func TasksList(connection *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.Header.Get("Authorization")
 		claims, err := parseToken(token)
@@ -107,7 +108,7 @@ func TasksList(connection *pgx.Conn) http.HandlerFunc {
 	}
 }
 
-func AddTask(connection *pgx.Conn, channel *amqp.Channel, client *http.Client) http.HandlerFunc {
+func AddTask(connection *pgxpool.Pool, channel *amqp.Channel, client *http.Client, confirmation chan amqp.Confirmation) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			body, err := ioutil.ReadAll(r.Body)
@@ -168,7 +169,14 @@ func AddTask(connection *pgx.Conn, channel *amqp.Channel, client *http.Client) h
 				log.Printf("can`t publish message: %s", err.Error())
 			}
 
-			//TODO: Add CUD to analytics service
+			confirm := <-confirmation
+			if confirm.Ack {
+				log.Printf("published message: %s", byteEvent)
+			} else {
+				log.Printf("failed to publish a message %s, error: %s", byteEvent, err.Error())
+			}
+
+			//TODO: add CUD to analytics service
 
 			w.Write([]byte("Ok!"))
 		} else {
@@ -177,7 +185,7 @@ func AddTask(connection *pgx.Conn, channel *amqp.Channel, client *http.Client) h
 	}
 }
 
-func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
+func ShuffleTasks(connection *pgxpool.Pool, channel *amqp.Channel, confirmation chan amqp.Confirmation) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 
@@ -238,7 +246,6 @@ func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc 
 				if err != nil {
 					http.Error(w, ErrSomething.Error(), http.StatusInternalServerError)
 				}
-				log.Print(string(byteEvent))
 
 				err = channel.Publish(
 					"trackerService.TaskStatus",
@@ -252,6 +259,12 @@ func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc 
 				if err != nil {
 					log.Printf("can`t publish message: %s", err.Error())
 				}
+				confirm := <-confirmation
+				if confirm.Ack {
+					log.Printf("published message: %s", byteEvent)
+				} else {
+					log.Printf("failed to publish a message %s, error: %s", byteEvent, err.Error())
+				}
 			}
 
 			//TODO: Add CUD to analytics service
@@ -262,7 +275,7 @@ func ShuffleTasks(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc 
 	}
 }
 
-func CloseTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
+func CloseTask(connection *pgxpool.Pool, channel *amqp.Channel, confirmation chan amqp.Confirmation) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		taskID := r.URL.Query().Get("task")
 		rows := connection.QueryRow(context.Background(), "UPDATE tasks SET is_open = $1 where id = $2 RETURNING is_open, public_id, popug_id", false, taskID)
@@ -296,6 +309,13 @@ func CloseTask(connection *pgx.Conn, channel *amqp.Channel) http.HandlerFunc {
 			})
 		if err != nil {
 			log.Printf("can`t publish message: %s", err.Error())
+		}
+
+		confirm := <-confirmation
+		if confirm.Ack {
+			log.Printf("published message: %s", byteEvent)
+		} else {
+			log.Printf("failed to publish a message %s, error: %s", byteEvent, err.Error())
 		}
 
 		//TODO: Add CUD to analytics service

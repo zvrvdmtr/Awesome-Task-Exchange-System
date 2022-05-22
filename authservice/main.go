@@ -27,7 +27,6 @@ type User struct {
 }
 
 // TODO figure out with OAuth library and maybe substitute it to another
-// TODO add separate file for entities
 // TODO queue naming
 
 var ErrInvalidSchema = errors.New("Invalid event schema")
@@ -54,6 +53,11 @@ func main() {
 		log.Fatalf("Can`t create channel: %s", err.Error())
 	}
 	defer channel.Close()
+
+	//publish confirmation
+	channel.Confirm(false)
+	confirmation := make(chan amqp.Confirmation)
+	channel.NotifyPublish(confirmation)
 
 	err = channel.ExchangeDeclare("authService.userRegistered", "fanout", true, false, false, false, nil)
 	if err != nil {
@@ -90,7 +94,7 @@ func main() {
 	client := http.Client{Timeout: 1 * time.Second}
 
 	// handlers
-	http.HandleFunc("/registration", Registration(clientStore, channel, &client))
+	http.HandleFunc("/registration", Registration(clientStore, channel, &client, confirmation))
 	http.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		srv.HandleTokenRequest(w, r)
 	})

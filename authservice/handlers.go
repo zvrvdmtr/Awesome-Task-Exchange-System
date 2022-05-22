@@ -12,7 +12,7 @@ import (
 	pg "github.com/vgarvardt/go-oauth2-pg/v4"
 )
 
-func Registration(clientStore *pg.ClientStore, channel *amqp.Channel, client *http.Client) http.HandlerFunc {
+func Registration(clientStore *pg.ClientStore, channel *amqp.Channel, client *http.Client, confirm chan amqp.Confirmation) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			body, err := ioutil.ReadAll(r.Body)
@@ -33,6 +33,8 @@ func Registration(clientStore *pg.ClientStore, channel *amqp.Channel, client *ht
 			})
 			if err != nil {
 				log.Printf("can`t add new user: %s", err.Error())
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
 			}
 			request, err := http.NewRequest("POST", "http://localhost:8083/validate_client", bytes.NewReader(body))
 			if err != nil {
@@ -41,9 +43,11 @@ func Registration(clientStore *pg.ClientStore, channel *amqp.Channel, client *ht
 			resp, err := client.Do(request)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
 			}
 			if resp.StatusCode != http.StatusOK {
 				http.Error(w, ErrInvalidSchema.Error(), http.StatusBadRequest)
+				return
 			}
 
 			err = channel.Publish(
@@ -56,8 +60,16 @@ func Registration(clientStore *pg.ClientStore, channel *amqp.Channel, client *ht
 					Body:        body,
 				})
 
+			// blocking operation wait while exchange response
+			confirmation := <-confirm
+			if confirmation.Ack {
+				log.Printf("published a message: %s", body)
+			} else {
+				log.Printf("failed to publish a message %s, error: %s", body, err.Error())
+			}
 			if err != nil {
-				log.Printf("failed to publish a message: %s", body)
+				log.Printf("failed to publish a message: %s", err.Error())
+				return
 			}
 
 			w.Header().Set("Content-Type", "application/json")
